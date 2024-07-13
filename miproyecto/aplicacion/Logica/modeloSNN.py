@@ -1,69 +1,73 @@
 from django.urls import reverse
 import pandas as pd
+import numpy as np
 from sklearn.pipeline import Pipeline
-from tensorflow.python.keras.models import load_model, model_from_json
-from keras import backend as K
-from aplicacion.Logica import modeloSNN
+from tensorflow.keras.models import load_model
 import pickle
 import keras
 
 class modeloSNN():
     """Clase modelo Preprocesamiento y SNN"""
-    #Función para cargar preprocesador
-    def cargarPipeline(self,nombreArchivo):
-        with open(nombreArchivo+'.pickle', 'rb') as handle:
+    
+    def __init__(self):
+        pass
+
+    # Función para cargar preprocesador
+    def cargarPipeline(self, nombreArchivo):
+        with open(nombreArchivo + '.pickle', 'rb') as handle:
             pipeline = pickle.load(handle)
         return pipeline
-    #Función para cargar red neuronal 
-    def cargarNN(self,nombreArchivo):  
-        model = keras.models.load_model(nombreArchivo+'.h5')
+    
+    # Función para cargar red neuronal
+    def cargarNN(self, nombreArchivo):  
+        model = load_model(nombreArchivo + '.h5')    
         print("Red Neuronal Cargada desde Archivo") 
         return model
-    #Función para integrar el preprocesador y la red neuronal en un Pipeline
-    def cargarModelo(self):
-        #Se carga el Pipeline de Preprocesamiento
-        nombreArchivoPreprocesador='resources/pipeBalanceado'
-        pipe=self.cargarPipeline(self,nombreArchivoPreprocesador)
-        print('Pipeline de Preprocesamiento Cargado')
-        cantidadPasos=len(pipe.steps)
-        print("Cantidad de pasos: ",cantidadPasos)
-        print(pipe.steps)
-        #Se carga la Red Neuronal
-        modeloOptimizado=self.cargarNN(self,'resources/modeloRedNeuronalOptimizadaTransformado')
-        #Se integra la Red Neuronal al final del Pipeline
-        pipe.steps.append(['modelNN',modeloOptimizado])
-        cantidadPasos=len(pipe.steps)
-        print("Cantidad de pasos: ",cantidadPasos)
-        print(pipe.steps)
-        print('Red Neuronal integrada al Pipeline')
-        return pipe
-    #La siguiente función permite predecir si se aprueba o no un crédito a un nuevo cliente. 
-    #En la función se define el valor por defecto de las variables, se crea el dataframe con los nuevos valores y 
-    #los nombres de las variables. 
-    #El método "predict" ejecuta el Pipeline: los pasos de transformación y la clasificación (mediante la red neuronal). 
-    #Así se predice si el cliente es bueno (1) o malo (0). 
-    def predecirNuevoCliente(self, Age=20, Race='Black', TStage='T1', NStage='N1', SixthStage='IIB', differentiate='Poorly differentiated', Grade='3', AStage='Regional', 
-                            TumorSize=10, EstrogenStatus='Positive', ProgesteroneStatus='Negative', RegionalNodeExamined=20, ReginolNodePositive=8):    
+    
+    # Función para obtener resultados y certezas
+    def obtenerResultadosyCertezas(self, lista):
+        predicciones = lista.argmax(axis=1)
+        marcas = []
+        certezas = []
         
-        pipe=self.cargarModelo(self)
-
-        cnames=['Age', 'Race', 'TStage', 'NStage', 'SixthStage', 'differentiate',
-        'Grade', 'AStage', 'TumorSize', 'EstrogenStatus',
-        'ProgesteroneStatus', 'RegionalNodeExamined',
-        'ReginolNodePositive']
-        Xnew=[Age, Race, TStage, NStage, SixthStage, differentiate, Grade, AStage, 
-            TumorSize, EstrogenStatus, ProgesteroneStatus, RegionalNodeExamined, 
-            ReginolNodePositive]
-
-        Xnew_Dataframe = pd.DataFrame(data=[Xnew],columns=cnames)
-        print(Xnew_Dataframe)
-        pred = (pipe.predict(Xnew_Dataframe) > 0.5).astype("int32")
-        print(pred)
-        pred = pred.flatten()[0]# de 2D a 1D
-
-        if pred == 1:
-            resultado = 'No te vas a morir. Felicidades =)'
-        else:
-            resultado = 'Te vas a morir :( lo siento mucho'
-
-        return resultado
+        for i, prediccion in enumerate(predicciones):
+            certeza = lista[i][prediccion] * 100  # Certeza en porcentaje
+            if prediccion == 0:
+                marca = 'Peso Bajo'
+            elif prediccion == 1:
+                marca = 'Peso Normal'
+            elif prediccion == 2:
+                marca = 'Sobrepeso Nivel 1'
+            elif prediccion == 3:
+                marca = 'Sobrepeso Nivel 2'
+            elif prediccion == 4:
+                marca = 'Obesidad Nivel 1'
+            elif prediccion == 5:
+                marca = 'Obesidad Nivel 2'
+            elif prediccion == 6:
+                marca = 'Obesidad Nivel 3'
+            
+            marcas.append(marca)
+            certezas.append(f'{certeza:.2f}%')
+        
+        return predicciones, marcas, certezas
+    
+    # Función para predecir nuevo cliente
+    def predecirNuevoCliente(self, EDAD=23, PESO=50, HISTORIAL_FAMILIAR='no', FAVC='no', CAEC='Sometimes', nombreModelo='resources/modeloRNOptimizadoBalanceado'):
+        cnames = ["EDAD", "PESO", "HISTORIAL_FAMILIAR", "FAVC", "CAEC"]
+        Xnew = [EDAD, PESO, HISTORIAL_FAMILIAR, FAVC, CAEC]
+        Xnew_Dataframe = pd.DataFrame(data=[Xnew], columns=cnames)
+        
+        pipe = self.cargarPipeline("resources/pipePreprocesadores")
+        Xnew_Transformado = pipe.transform(Xnew_Dataframe)
+        
+        modelo = self.cargarNN(nombreModelo)
+        y_pred = modelo.predict(Xnew_Transformado)
+        
+        predicciones, marcas, certezas = self.obtenerResultadosyCertezas(y_pred)
+        
+        dataframeFinal = pd.DataFrame({'Predicción': predicciones, 'Resultado': marcas, 'Certeza': certezas})
+        
+        np.set_printoptions(formatter={'float': lambda x: "{0:0.0f}".format(x)})
+        
+        return dataframeFinal
